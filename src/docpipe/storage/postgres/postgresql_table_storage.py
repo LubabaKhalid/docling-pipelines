@@ -1,7 +1,6 @@
 """PostgreSQL storage implementation for PyArrow tables."""
 
 import re
-from collections.abc import Mapping
 from typing import Any
 
 import pyarrow as pa
@@ -336,13 +335,19 @@ class PostgreSQLTableStorage(TableStoragePort):
         except Exception as exc:
             raise StorageException(message=f"Failed to get row count for {table_name}: {exc}") from exc
 
-    def execute_query(self, *, query: str, params: Mapping[str, Any] | None = None) -> pa.Table:
+    def execute_query(self, *, query: str, params: list[Any] | None = None) -> pa.Table:
+        """Execute a SQL query and return results as PyArrow table.
+
+        As in the other ``TableStoragePort`` implementations, ``params`` are
+        positional. They are passed to the database driver, so the query uses
+        its placeholder style (``%s`` for psycopg2).
+        """
         try:
             with self.engine.connect() as connection:
-                result = connection.execute(
-                    text(query),
-                    params or {},
-                )
+                if params:
+                    result = connection.exec_driver_sql(query, tuple(params))
+                else:
+                    result = connection.execute(text(query))
 
                 rows = result.mappings().all()
                 columns = list(result.keys())

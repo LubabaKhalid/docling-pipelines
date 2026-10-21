@@ -402,17 +402,33 @@ class TestPostgreSQLTableStorageReadOperations:
 
         result = MagicMock()
         result.mappings.return_value = mappings
-        connection.execute.return_value = result
+        connection.exec_driver_sql.return_value = result
 
-        table = storage.execute_query(
-            query='SELECT "id", "amount" FROM "invoice" WHERE "id" = :id',
-            params={"id": "doc1"},
-        )
+        query = 'SELECT "id", "amount" FROM "invoice" WHERE "id" = %s'
+        table = storage.execute_query(query=query, params=["doc1"])
 
         assert table.to_pylist() == [
             {"id": "doc1", "amount": 10.5},
         ]
 
-        connection.execute.assert_called_once()
-        params = connection.execute.call_args.args[1]
-        assert params == {"id": "doc1"}
+        # Positional params, as in the TableStoragePort interface, go to the driver.
+        connection.exec_driver_sql.assert_called_once_with(query, ("doc1",))
+        connection.execute.assert_not_called()
+
+    def test_execute_query_without_params(self, storage):
+        connection = storage.engine.connect.return_value.__enter__.return_value
+
+        mappings = MagicMock()
+        mappings.all.return_value = []
+
+        result = MagicMock()
+        result.mappings.return_value = mappings
+        result.keys.return_value = ["id"]
+        connection.execute.return_value = result
+
+        table = storage.execute_query(query='SELECT "id" FROM "invoice"')
+
+        assert table.num_rows == 0
+        assert table.column_names == ["id"]
+        assert str(connection.execute.call_args.args[0]) == 'SELECT "id" FROM "invoice"'
+        connection.exec_driver_sql.assert_not_called()

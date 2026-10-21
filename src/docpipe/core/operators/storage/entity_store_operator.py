@@ -55,7 +55,7 @@ class EntityStoreOperator(AbstractOperator):
                 config=postgres_config,
             )
 
-    def transform(self, table: pa.Table, file_name: str | None = None) -> TransformResult:
+    def transform(self, table: pa.Table) -> TransformResult:
         """Store curated entities and return the input table unchanged."""
         metadata: OperatorOutputMetadata = self.create_base_metadata(
             total_docs_count=table.num_rows,
