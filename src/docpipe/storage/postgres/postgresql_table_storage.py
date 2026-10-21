@@ -39,6 +39,11 @@ _PYARROW_TO_POSTGRES: list[tuple[Any, str]] = [
 class PostgreSQLTableStorage(TableStoragePort):
     """PostgreSQL implementation of PyArrow table storage."""
 
+    # Tables are created without a schema prefix, so they are in the default
+    # "public" schema. Lookups in information_schema are limited to it, so a
+    # table with the same name in another schema is never read.
+    _SCHEMA = "public"
+
     def __init__(self, *, config: dict[str, Any] | None = None) -> None:
         self.config = config or {}
 
@@ -126,14 +131,15 @@ class PostgreSQLTableStorage(TableStoragePort):
         current_columns_query = """
             SELECT column_name
             FROM information_schema.columns
-            WHERE table_name = :table_name
+            WHERE table_schema = :table_schema
+            AND table_name = :table_name
         """
 
         try:
             with self.engine.begin() as connection:
                 result = connection.execute(
                     text(current_columns_query),
-                    {"table_name": table_name},
+                    {"table_schema": self._SCHEMA, "table_name": table_name},
                 )
                 current_columns = {row["column_name"] for row in result.mappings().all()}
 
@@ -218,9 +224,10 @@ class PostgreSQLTableStorage(TableStoragePort):
 
             rows = data.to_pylist()
 
+            # One bulk call: SQLAlchemy runs a list of rows as executemany,
+            # instead of one server round-trip per row.
             with self.engine.begin() as connection:
-                for row in rows:
-                    connection.execute(text(query), row)
+                connection.execute(text(query), rows)
 
             logger.debug("Upserted %s rows into PostgreSQL table %s", len(rows), table_name)
 
@@ -302,14 +309,15 @@ class PostgreSQLTableStorage(TableStoragePort):
                 SELECT EXISTS (
                     SELECT 1
                     FROM information_schema.tables
-                    WHERE table_schema = 'public'
+                    WHERE table_schema = :table_schema
                     AND table_name = :table_name
                 )
                 """
             )
 
+            params = {"table_schema": self._SCHEMA, "table_name": table_name}
             with self.engine.connect() as connection:
-                return bool(connection.execute(query, {"table_name": table_name}).scalar())
+                return bool(connection.execute(query, params).scalar())
 
         except Exception as exc:
             logger.error("Failed to check if table %s exists: %s", table_name, exc)

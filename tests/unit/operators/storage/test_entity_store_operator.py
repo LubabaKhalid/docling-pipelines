@@ -58,6 +58,16 @@ class TestOperatorMetadata:
         assert attributes["data_backend"]["valid_values"] == ["duckdb", "postgres"]
         assert attributes["database_path"]["default"] == ":memory:"
 
+    def test_operator_attributes_list_every_config_key(self, basic_config):
+        """Every config key read by __init__ is declared, so the UI can show it."""
+        attributes = EntityStoreOperator.get_metadata()["attributes"]
+
+        assert set(attributes) == {"data_backend", "database_path", "entities_column", "postgres"}
+        assert attributes["entities_column"]["default"] == "transformed_entities"
+        assert attributes["postgres"]["type"] == "json"
+        assert set(attributes["postgres"]["properties"]) == {"host", "port", "database", "user", "password"}
+        assert attributes["postgres"]["properties"]["password"]["sensitive"] is True
+
     def test_operator_category(self, basic_config):
         """Test operator category."""
         operator = EntityStoreOperator(basic_config)
@@ -217,7 +227,7 @@ class TestPostgresConfiguration:
             "port": 5432,
             "database": "docpipe",
             "user": "docpipe_user",
-            "password": "test-password",
+            "password": "test-password",  # pragma: allowlist secret
         }
 
         config = {

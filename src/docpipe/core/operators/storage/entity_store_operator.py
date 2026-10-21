@@ -4,7 +4,7 @@ import json
 
 import pyarrow as pa
 
-from docpipe.core.constants.constants import ExecutionStatus, Metrics
+from docpipe.core.constants.constants import AttributeDataTypes, ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.storage.factory import StorageFactory
@@ -164,13 +164,70 @@ class EntityStoreOperator(AbstractOperator):
             "owner": "docpipe",
             "attributes": {
                 "data_backend": {
-                    "type": "string",
-                    "default": "duckdb",
-                    "valid_values": ["duckdb", "postgres"],
+                    OperatorConstants.Misc.NAME: "Data Backend",
+                    OperatorConstants.Config.DESCRIPTION: "Database that stores the curated entities.",
+                    OperatorConstants.Config.REQUIRED: False,
+                    OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                    OperatorConstants.Config.DEFAULT: "duckdb",
+                    OperatorConstants.Config.VALID_VALUES: list(EntityStoreOperator._SUPPORTED_BACKENDS),
                 },
                 "database_path": {
-                    "type": "string",
-                    "default": ":memory:",
+                    OperatorConstants.Misc.NAME: "Database Path",
+                    OperatorConstants.Config.DESCRIPTION: (
+                        "DuckDB database file, or ':memory:' for an in-memory database. Used by the duckdb backend."
+                    ),
+                    OperatorConstants.Config.REQUIRED: False,
+                    OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                    OperatorConstants.Config.DEFAULT: ":memory:",
+                },
+                "entities_column": {
+                    OperatorConstants.Misc.NAME: "Entities Column",
+                    OperatorConstants.Config.DESCRIPTION: "Column that holds the curated entities of each document.",
+                    OperatorConstants.Config.REQUIRED: False,
+                    OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                    OperatorConstants.Config.DEFAULT: OperatorConstants.Columns.TRANSFORMED_ENTITIES_COLUMN_NAME,
+                },
+                "postgres": {
+                    OperatorConstants.Misc.NAME: "PostgreSQL Connection",
+                    OperatorConstants.Config.DESCRIPTION: (
+                        "Connection settings for the postgres backend. A setting that is not given falls back "
+                        "to its DOCPIPE_POSTGRES_* environment variable."
+                    ),
+                    OperatorConstants.Config.REQUIRED: False,
+                    OperatorConstants.Misc.TYPE: AttributeDataTypes.JSON,
+                    OperatorConstants.Config.DEFAULT: {},
+                    OperatorConstants.Config.PROPERTIES: {
+                        "host": {
+                            OperatorConstants.Misc.NAME: "Host",
+                            OperatorConstants.Config.REQUIRED: False,
+                            OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                            OperatorConstants.Config.DEFAULT: "localhost",
+                        },
+                        "port": {
+                            OperatorConstants.Misc.NAME: "Port",
+                            OperatorConstants.Config.REQUIRED: False,
+                            OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                            OperatorConstants.Config.DEFAULT: "5432",
+                        },
+                        "database": {
+                            OperatorConstants.Misc.NAME: "Database",
+                            OperatorConstants.Config.REQUIRED: False,
+                            OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                            OperatorConstants.Config.DEFAULT: "docpipe",
+                        },
+                        "user": {
+                            OperatorConstants.Misc.NAME: "User",
+                            OperatorConstants.Config.REQUIRED: False,
+                            OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                            OperatorConstants.Config.DEFAULT: "docpipe_user",
+                        },
+                        "password": {
+                            OperatorConstants.Misc.NAME: "Password",
+                            OperatorConstants.Config.REQUIRED: False,
+                            OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                            OperatorConstants.Config.SENSITIVE: True,
+                        },
+                    },
                 },
             },
         }

@@ -203,19 +203,18 @@ class TestPostgreSQLTableStorageOperations:
 
         insert_calls = [call for call in connection.execute.call_args_list if "INSERT INTO" in str(call.args[0])]
 
-        assert len(insert_calls) == 2
+        # All rows go in one bulk call, not one call per row.
+        assert len(insert_calls) == 1
 
-        first_call = insert_calls[0]
-        query = str(first_call.args[0])
-        params = first_call.args[1]
+        query = str(insert_calls[0].args[0])
+        params = insert_calls[0].args[1]
 
         assert 'INSERT INTO "invoice"' in query
         assert 'ON CONFLICT ("id") DO UPDATE SET' in query
-        assert params == {
-            "id": "doc1",
-            "name": "Document 1",
-            "amount": 10.5,
-        }
+        assert params == [
+            {"id": "doc1", "name": "Document 1", "amount": 10.5},
+            {"id": "doc2", "name": "Document 2", "amount": 20.5},
+        ]
 
     def test_upsert_adds_new_columns(self, storage, monkeypatch):
         monkeypatch.setattr(
@@ -251,6 +250,12 @@ class TestPostgreSQLTableStorageOperations:
         assert len(alter_queries) == 1
         assert 'ALTER TABLE "Invoice"' in alter_queries[0]
         assert 'ADD COLUMN "invoice_date" TEXT' in alter_queries[0]
+
+        # The existing columns are read from the table's own schema only.
+        columns_call = connection.execute.call_args_list[0]
+        assert "information_schema.columns" in str(columns_call.args[0])
+        assert "table_schema = :table_schema" in str(columns_call.args[0])
+        assert columns_call.args[1] == {"table_schema": "public", "table_name": "Invoice"}
 
     def test_upsert_empty_table_does_not_execute(self, storage, monkeypatch):
         monkeypatch.setattr(
@@ -307,7 +312,7 @@ class TestPostgreSQLTableStorageJson:
 
         call = insert_calls[0]
         query = str(call.args[0])
-        params = call.args[1]
+        [params] = call.args[1]
 
         assert 'INSERT INTO "Invoice_line_items"' in query
         assert params["id"] == "doc1:Invoice_line_items:0"
@@ -390,7 +395,7 @@ class TestPostgreSQLTableStorageReadOperations:
         assert "table_name = :table_name" in query
 
         params = connection.execute.call_args.args[1]
-        assert params == {"table_name": "invoice"}
+        assert params == {"table_schema": "public", "table_name": "invoice"}
 
     def test_execute_query(self, storage):
         connection = storage.engine.connect.return_value.__enter__.return_value
