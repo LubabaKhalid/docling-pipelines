@@ -62,11 +62,10 @@ class TestOperatorMetadata:
         """Every config key read by __init__ is declared, so the UI can show it."""
         attributes = EntityStoreOperator.get_metadata()["attributes"]
 
-        assert set(attributes) == {"data_backend", "database_path", "entities_column", "postgres"}
+        assert set(attributes) == {"data_backend", "database_path", "schema", "table_prefix", "entities_column"}
+        assert attributes["schema"]["default"] == "docpipe_entities"
+        assert attributes["table_prefix"]["default"] == "entity_"
         assert attributes["entities_column"]["default"] == "transformed_entities"
-        assert attributes["postgres"]["type"] == "json"
-        assert set(attributes["postgres"]["properties"]) == {"host", "port", "database", "user", "password"}
-        assert attributes["postgres"]["properties"]["password"]["sensitive"] is True
 
     def test_operator_category(self, basic_config):
         """Test operator category."""
@@ -95,11 +94,15 @@ class TestOperatorConfiguration:
 
         assert operator.data_backend == "duckdb"
         assert operator.database_path == ":memory:"
+        assert operator.schema == "docpipe_entities"
+        assert operator.table_prefix == "entity_"
         assert operator.entities_column == "transformed_entities"
 
+        # One storage block for every backend; the factory picks the settings of each.
         mock_factory.assert_called_once_with(
             storage_type="duckdb",
             database_path=":memory:",
+            schema="docpipe_entities",
         )
 
     def test_custom_entities_column(self):
@@ -123,6 +126,11 @@ class TestOperatorConfiguration:
         """Test unsupported storage backend."""
         with pytest.raises(ValueError, match="Unsupported entity storage backend"):
             EntityStoreOperator({"data_backend": "filesystem"})
+
+    @pytest.mark.parametrize("table_prefix", ["bad-prefix", 5])
+    def test_invalid_table_prefix(self, table_prefix):
+        with pytest.raises(ValueError, match="Invalid table_prefix"):
+            EntityStoreOperator({"table_prefix": table_prefix})
 
 
 class TestOperatorFeatures:
@@ -219,28 +227,26 @@ class TestPostgresConfiguration:
 
     @patch("docpipe.core.operators.storage.entity_store_operator.StorageFactory.create_table_storage")
     def test_postgres_backend(self, mock_factory):
-        """Test PostgreSQL backend configuration."""
+        """The operator passes only non-secret settings; the connection comes from DOCPIPE_POSTGRES_*."""
         mock_factory.return_value = MagicMock()
 
-        postgres_config = {
-            "host": "localhost",
-            "port": 5432,
-            "database": "docpipe",
-            "user": "docpipe_user",
-            "password": "test-password",  # pragma: allowlist secret
-        }
-
-        config = {
-            "data_backend": "postgres",
-            "postgres": postgres_config,
-        }
-
-        EntityStoreOperator(config)
+        EntityStoreOperator({"data_backend": "postgres", "schema": "invoice_entities"})
 
         mock_factory.assert_called_once_with(
             storage_type="postgres",
-            config=postgres_config,
+            database_path=":memory:",
+            schema="invoice_entities",
         )
+
+    def test_postgres_credentials_are_rejected(self):
+        """Connection settings in the flow configuration would be stored with every run."""
+        config = {
+            "data_backend": "postgres",
+            "postgres": {"password": "test-password"},  # pragma: allowlist secret
+        }
+
+        with pytest.raises(ValueError, match="DOCPIPE_POSTGRES_"):
+            EntityStoreOperator(config)
 
 
 class TestEntityStorage:
@@ -314,7 +320,7 @@ class TestEntityStorageDuckDB:
         assert metadata[Metrics.External.PROCESSED_DOCS] == 1
         assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
 
-        stored = operator.storage.read_data(table_name="Invoice")
+        stored = operator.storage.read_data(table_name="entity_Invoice")
 
         assert stored.column("id").to_pylist() == ["doc1:Invoice"]
         assert stored.column("invoice_id").to_pylist() == ["INV-001"]
@@ -353,7 +359,7 @@ class TestEntityStorageArrays:
         assert metadata[Metrics.External.PROCESSED_DOCS] == 1
         assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
 
-        stored = operator.storage.read_data(table_name="Invoice_line_items")
+        stored = operator.storage.read_data(table_name="entity_Invoice_line_items")
 
         assert stored.column("id").to_pylist() == [
             "doc1:Invoice_line_items:0",
@@ -391,7 +397,7 @@ class TestEntityStorageMultipleDocuments:
         assert metadata[Metrics.External.PROCESSED_DOCS] == 2
         assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
 
-        stored = operator.storage.read_data(table_name="Invoice")
+        stored = operator.storage.read_data(table_name="entity_Invoice")
 
         assert stored.num_rows == 2
         assert stored.column("id").to_pylist() == [
@@ -497,7 +503,7 @@ class TestEntityStorageSchemaEvolution:
         assert metadata[Metrics.External.PROCESSED_DOCS] == 2
         assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
 
-        stored = operator.storage.read_data(table_name="Invoice")
+        stored = operator.storage.read_data(table_name="entity_Invoice")
 
         assert stored.num_rows == 2
         assert stored.column("id").to_pylist() == [
@@ -516,3 +522,159 @@ class TestEntityStorageSchemaEvolution:
             None,
             "2026-10-07",
         ]
+
+
+def _entities_table(*documents: str) -> pa.Table:
+    """Return an input table with one document per curated entities JSON string."""
+    return pa.table(
+        {
+            "id": [f"doc{index}" for index in range(1, len(documents) + 1)],
+            "name": [f"invoice{index}.pdf" for index in range(1, len(documents) + 1)],
+            "transformed_entities": list(documents),
+        }
+    )
+
+
+class TestEntityKeys:
+    """The composite row id cannot be replaced by an entity's own id."""
+
+    def test_entities_with_the_same_own_id_are_kept_apart(self, tmp_path):
+        table = _entities_table(
+            '{"Invoice": {"id": "INV-1", "amount": 10}}',
+            '{"Invoice": {"id": "INV-1", "amount": 20}}',
+        )
+        operator = EntityStoreOperator({"database_path": str(tmp_path / "entities.db")})
+
+        _tables, metadata = operator.transform(table)
+
+        stored = operator.storage.read_data(table_name="entity_Invoice")
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 2
+        assert stored.to_pylist() == [
+            {"id": "doc1:Invoice", "amount": 10, "entity_id": "INV-1"},
+            {"id": "doc2:Invoice", "amount": 20, "entity_id": "INV-1"},
+        ]
+
+    def test_list_items_get_an_index_in_their_id(self):
+        rows = EntityStoreOperator._entity_rows(
+            doc_id="doc1", table_name="Lines", entity_data=[{"id": 7, "sku": "A"}, "not an object", {"sku": "B"}]
+        )
+
+        assert rows == [
+            {"id": "doc1:Lines:0", "sku": "A", "entity_id": 7},
+            {"id": "doc1:Lines:2", "sku": "B"},
+        ]
+
+
+class TestEntityTableNames:
+    """Entity table names are prefixed and must not collide with other tables."""
+
+    def test_table_names_get_the_prefix(self):
+        assert EntityStoreOperator._entity_table_name(table_prefix="entity_", table_name="Invoice") == "entity_Invoice"
+
+    @pytest.mark.parametrize(
+        ("table_prefix", "table_name", "message"),
+        [
+            ("", "docpipe_jobs", "reserved"),
+            ("", "pg_stats", "reserved"),
+            ("", "document_sets", "reserved"),
+            ("entity_", "bad name", "Invalid entity table name"),
+            ("entity_", "x" * 60, "Invalid entity table name"),
+        ],
+    )
+    def test_invalid_or_reserved_table_names(self, table_prefix, table_name, message):
+        with pytest.raises(ValueError, match=message):
+            EntityStoreOperator._entity_table_name(table_prefix=table_prefix, table_name=table_name)
+
+    @patch("docpipe.core.operators.storage.entity_store_operator.StorageFactory.create_table_storage")
+    def test_a_reserved_table_name_fails_only_its_document(self, mock_factory):
+        storage = MagicMock()
+        storage.table_exists.return_value = True
+        mock_factory.return_value = storage
+        table = _entities_table('{"Invoice": {"amount": 1}}', '{"Invoice": {"amount": 2}}')
+
+        _tables, metadata = EntityStoreOperator({"table_prefix": "docpipe_"}).transform(table)
+
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 2
+        assert "reserved" in metadata[Metrics.External.FAILED_DOCS][0]["reason"]
+        storage.upsert_data.assert_not_called()
+
+
+class TestEntityStorageWriteFailures:
+    """A table that cannot be written fails only the documents with rows in it."""
+
+    @patch("docpipe.core.operators.storage.entity_store_operator.StorageFactory.create_table_storage")
+    def test_failed_table_fails_only_its_documents(self, mock_factory):
+        storage = MagicMock()
+        storage.table_exists.return_value = True
+
+        def upsert(*, table_name, data):
+            if table_name == "entity_Invoice":
+                raise RuntimeError("column amount has an incompatible type")
+
+        storage.upsert_data.side_effect = upsert
+        mock_factory.return_value = storage
+        table = _entities_table(
+            '{"Invoice": {"amount": 1}, "Vendor": {"name": "Acme"}}',
+            '{"Vendor": {"name": "Beta"}}',
+        )
+
+        _tables, metadata = EntityStoreOperator({}).transform(table)
+
+        # doc1 has rows in the failed table; doc2 only in the table that was written.
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 1
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1
+        [failed] = metadata[Metrics.External.FAILED_DOCS]
+        assert failed["id"] == "doc1"
+        assert "entity_Invoice" in failed["reason"]
+        assert metadata[Metrics.External.NODE_STATUS] == ExecutionStatus.COMPLETED_WITH_ERRORS
+        written = [call.kwargs["table_name"] for call in storage.upsert_data.call_args_list]
+        assert written == ["entity_Invoice", "entity_Vendor"]
+        storage.close.assert_called_once()
+
+    @patch("docpipe.core.operators.storage.entity_store_operator.StorageFactory.create_table_storage")
+    def test_storage_is_closed_when_writing_fails(self, mock_factory):
+        storage = MagicMock()
+        storage.table_exists.side_effect = RuntimeError("database is down")
+        mock_factory.return_value = storage
+
+        _tables, metadata = EntityStoreOperator({}).transform(_entities_table('{"Invoice": {"amount": 1}}'))
+
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1
+        storage.close.assert_called_once()
+
+
+class TestEntityValueTypes:
+    """Documents can give one field different types; each column gets one type."""
+
+    @pytest.mark.parametrize(
+        ("values", "expected_type", "expected_values"),
+        [
+            ([1, 2.5], pa.float64(), [1.0, 2.5]),
+            ([5, "5.0"], pa.string(), ["5", "5.0"]),
+            ([True, 1], pa.string(), ["True", "1"]),
+            ([{"unit": "EA"}, "EA"], pa.string(), ['{"unit": "EA"}', "EA"]),
+            ([1, None], pa.int64(), [1, None]),
+        ],
+    )
+    def test_mixed_values_get_a_common_type(self, values, expected_type, expected_values):
+        rows = [{"id": f"doc{index}:T", "value": value} for index, value in enumerate(values)]
+
+        table = EntityStoreOperator._to_arrow_table(rows=rows)
+
+        assert table.schema.field("value").type == expected_type
+        assert table.column("value").to_pylist() == expected_values
+
+    def test_a_column_without_values_is_left_out(self):
+        table = EntityStoreOperator._to_arrow_table(rows=[{"id": "a", "note": None}, {"id": "b", "note": None}])
+
+        assert table.column_names == ["id"]
+
+    def test_mixed_types_across_documents_are_stored(self, tmp_path):
+        table = _entities_table('{"Invoice": {"amount": 5}}', '{"Invoice": {"amount": "5.0"}}')
+        operator = EntityStoreOperator({"database_path": str(tmp_path / "entities.db")})
+
+        _tables, metadata = operator.transform(table)
+
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 2
+        stored = operator.storage.read_data(table_name="entity_Invoice")
+        assert stored.column("amount").to_pylist() == ["5", "5.0"]
