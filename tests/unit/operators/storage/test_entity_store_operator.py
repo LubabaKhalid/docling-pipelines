@@ -564,6 +564,13 @@ class TestEntityKeys:
             {"id": "doc1:Lines:2", "sku": "B"},
         ]
 
+    def test_an_own_entity_id_field_is_kept(self):
+        rows = EntityStoreOperator._entity_rows(
+            doc_id="doc1", table_name="Invoice", entity_data={"id": "INV-1", "entity_id": "E-9", "amount": 10}
+        )
+
+        assert rows == [{"id": "doc1:Invoice", "entity_id": "E-9", "amount": 10}]
+
 
 class TestEntityTableNames:
     """Entity table names are prefixed and must not collide with other tables."""

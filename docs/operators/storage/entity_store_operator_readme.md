@@ -89,7 +89,7 @@ This operator does not add or remove columns. The original input table is return
 | Column | Description |
 |---|---|
 | `id` | Row id: `<document id>:<entity table>` for an object, `<document id>:<entity table>:<index>` for a list item |
-| `entity_id` | The entity's own `id` field, if it has one |
+| `entity_id` | The entity's own `id` field, if it has one. An entity that has its own `entity_id` field keeps that value |
 | other columns | The fields of the entity |
 
 ---
@@ -147,7 +147,7 @@ export DOCPIPE_POSTGRES_PASSWORD=...
 | `PostgreSQL connection settings are not accepted in the operator configuration` | The operator config has a `postgres` block | Remove it and use the environment variables |
 | Document failed with `Entity table name ... is reserved` | The prefixed table name starts with `docpipe_` or `pg_`, or is `document_sets` | Use another `table_prefix` |
 | Document failed with `Invalid entity table name` | The curated JSON key has characters other than letters, digits and underscores, or the name is longer than 63 characters | Fix the target table names in the document class schema |
-| Document failed with `Column ... has type ..., which cannot store values of type ...` | A field changed type after the table was created | Keep field types stable, or store the field under a new name |
+| Document failed with `Column ... has type ..., which cannot store values of type ...` | A field changed type after the table was created (an integer column taking float values is widened instead) | Keep field types stable, or store the field under a new name |
 | Document skipped with `Column 'transformed_entities' is empty` | No entities were curated for the document | Check the upstream `EntityCurationOperator` |
 
 ---
@@ -160,6 +160,10 @@ Each entity table gets one type per column. When documents in one batch give a f
 types, integers and floats become floats, and any other mix becomes text (JSON text for nested
 values). A field that is null in every document of the batch is not added until a document has a
 value for it. Nested values are stored as JSON (`JSONB` in PostgreSQL) and read back as JSON text.
+
+The first batch that writes a column fixes its type. When a later batch writes float values into an
+integer column, the column is widened to a double-precision float, so `5.5` is never rounded to `6`.
+Other type changes, such as text into a number column, fail the documents of that table.
 
 ### Shared PostgreSQL backend
 

@@ -380,3 +380,43 @@ class TestPostgresTableStorageOperations:
 
         with pytest.raises(StorageException, match="Failed to execute query"):
             storage.execute_query(query="SELEC 1")
+
+
+class TestPostgresTableStorageWidening:
+    """Integer columns become DOUBLE PRECISION when float values arrive."""
+
+    @pytest.mark.parametrize(
+        ("existing", "incoming", "widen"),
+        [
+            ("bigint", pa.float64(), True),
+            ("integer", pa.float32(), True),
+            ("bigint", pa.int64(), False),
+            ("double precision", pa.float64(), False),
+            ("text", pa.float64(), False),
+        ],
+    )
+    def test_needs_widening(self, existing, incoming, widen):
+        assert PostgresTableStorage._needs_widening(existing=existing, incoming=incoming) is widen
+
+    def test_upsert_widens_an_integer_column(self, storage, engine):
+        engine.columns = [
+            {"column_name": "id", "data_type": "text"},
+            {"column_name": "amount", "data_type": "bigint"},
+        ]
+
+        storage.upsert_data(table_name="invoice", data=pa.table({"id": ["doc1"], "amount": [5.5]}))
+
+        [(sql, _params)] = engine.sql("ALTER COLUMN")
+        assert 'ALTER TABLE "entities"."invoice" ALTER COLUMN "amount" TYPE DOUBLE PRECISION' in sql
+        [(_insert, rows)] = engine.sql("INSERT INTO")
+        assert rows == [{"id": "doc1", "amount": 5.5}]
+
+    def test_execute_query_without_rows_forgets_the_cached_columns(self, storage, engine):
+        engine.columns = [{"column_name": "id", "data_type": "text"}]
+        storage.upsert_data(table_name="invoice", data=pa.table({"id": ["doc1"]}))
+
+        storage.execute_query(query="ALTER TABLE invoice ADD COLUMN note TEXT")
+        storage.upsert_data(table_name="invoice", data=pa.table({"id": ["doc1"]}))
+
+        # The second upsert reads the columns again, because the statement could have changed them.
+        assert len(engine.sql("information_schema.columns")) == 2

@@ -212,6 +212,19 @@ class PostgresTableStorage(TableStoragePort):
         return "TEXT"
 
     @staticmethod
+    def _needs_widening(*, existing: str, incoming: pa.DataType) -> bool:
+        """Return whether an integer column must become a float column to store the values.
+
+        Args:
+            existing: ``information_schema`` data type of the column.
+            incoming: PyArrow type of the new values.
+
+        Returns:
+            True for float values and an integer column.
+        """
+        return existing in _INTEGER_TYPES and (pa.types.is_floating(incoming) or pa.types.is_decimal(incoming))
+
+    @staticmethod
     def _is_compatible_type(*, existing: str, incoming: pa.DataType) -> bool:
         """Return whether values of a PyArrow type can be written to an existing column.
 
@@ -348,6 +361,8 @@ class PostgresTableStorage(TableStoragePort):
     def _handle_schema_evolution(self, *, table_name: str, new_schema: pa.Schema) -> dict[str, str]:
         """Add the columns of the new schema that the table does not have yet.
 
+        An integer column that receives float values becomes ``DOUBLE PRECISION``, so
+        values from later runs are not rejected because the first run only had integers.
         The column types are cached per table, so ``information_schema`` is only read
         when the data has a column that was not seen before.
 
@@ -365,9 +380,14 @@ class PostgresTableStorage(TableStoragePort):
         if column_types is None or not set(new_schema.names) <= set(column_types):
             column_types = self._read_column_types(table_name=table_name)
 
+        columns_to_widen = []
         for field in new_schema:
             existing = column_types.get(field.name)
-            if existing is not None and not self._is_compatible_type(existing=existing, incoming=field.type):
+            if existing is None:
+                continue
+            if self._needs_widening(existing=existing, incoming=field.type):
+                columns_to_widen.append(field.name)
+            elif not self._is_compatible_type(existing=existing, incoming=field.type):
                 raise StorageValidationError(
                     message=(
                         f"Column {field.name} of table {table_name} has type {existing}, "
@@ -376,9 +396,16 @@ class PostgresTableStorage(TableStoragePort):
                 )
 
         columns_to_add = [field for field in new_schema if field.name not in column_types]
-        if columns_to_add:
+        if columns_to_add or columns_to_widen:
             qualified_table = self._qualified_table(table_name=table_name)
             with self.engine.begin() as connection:
+                for column_name in columns_to_widen:
+                    quoted_column = self._quote_identifier(identifier=column_name)
+                    connection.execute(
+                        text(f"ALTER TABLE {qualified_table} ALTER COLUMN {quoted_column} TYPE DOUBLE PRECISION")
+                    )
+                    column_types[column_name] = "double precision"
+                    logger.info("Widened column %s of PostgreSQL table %s.%s", column_name, self.schema, table_name)
                 for field in columns_to_add:
                     self._validate_identifier(identifier=field.name, kind="column name")
                     postgres_type = self._pyarrow_to_postgres_type(pa_type=field.type)
@@ -567,7 +594,8 @@ class PostgresTableStorage(TableStoragePort):
         """Execute a SQL query with ``?`` placeholders and return the result.
 
         Unqualified table names refer to the storage schema, as in ``DuckDBTableStorage``
-        they refer to its database.
+        they refer to its database. The statement runs in its own transaction, which is
+        committed, so a write is kept as in DuckDB.
 
         Args:
             query: SQL with ``?`` placeholders.
@@ -577,12 +605,14 @@ class PostgresTableStorage(TableStoragePort):
             Query result as a PyArrow table (empty if the statement returns no rows).
         """
         try:
-            with self.engine.connect() as connection:
+            with self.engine.begin() as connection:
                 connection.exec_driver_sql(
                     f"SET LOCAL search_path TO {self._quote_identifier(identifier=self.schema)}, public", ()
                 )
                 result = connection.exec_driver_sql(self._to_driver_sql(query=query), tuple(params or ()))
                 if not result.returns_rows:
+                    # The statement can have changed a table, so read its columns again when needed.
+                    self._column_types.clear()
                     return pa.table({})
                 description = result.cursor.description
                 rows = list(result.fetchall())

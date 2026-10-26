@@ -132,6 +132,32 @@ def test_execute_query_takes_question_mark_placeholders(storage: TableStoragePor
     assert literal.to_pylist() == [{"pct": "100%", "text_value": "a:b?"}]
 
 
+def test_execute_query_writes_are_committed(storage: TableStoragePort) -> None:
+    _create_invoices(storage)
+
+    storage.execute_query(
+        query="INSERT INTO invoice (id, amount, count, paid) VALUES (?, ?, ?, ?)", params=["d", 40.5, 4, False]
+    )
+    storage.execute_query(query="UPDATE invoice SET amount = ? WHERE id = ?", params=[11.0, "a"])
+
+    rows = storage.read_data(table_name="invoice").to_pylist()
+    assert storage.get_row_count(table_name="invoice") == 4
+    assert rows[0] == {"id": "a", "amount": 11.0, "count": 1, "paid": False}
+    assert rows[3] == {"id": "d", "amount": 40.5, "count": 4, "paid": False}
+
+
+def test_integer_column_is_widened_for_float_values(storage: TableStoragePort) -> None:
+    # A first run that only has integers creates the column as an integer column.
+    storage.create_table(table_name="totals", schema=pa.schema([("id", pa.string()), ("amount", pa.int64())]))
+    storage.upsert_data(table_name="totals", data=pa.table({"id": ["a"], "amount": [5]}))
+
+    storage.upsert_data(table_name="totals", data=pa.table({"id": ["b"], "amount": [5.5]}))
+
+    stored = storage.read_data(table_name="totals")
+    assert stored.schema.field("amount").type == pa.float64()
+    assert stored.column("amount").to_pylist() == [5.0, 5.5]
+
+
 def test_same_table_name_in_two_schemas(backend: str, postgres_settings: dict[str, Any], postgres_schemas) -> None:
     if backend != "postgres":
         pytest.skip("Only the PostgreSQL backend has schemas")

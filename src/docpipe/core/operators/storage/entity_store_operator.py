@@ -220,7 +220,8 @@ class EntityStoreOperator(AbstractOperator):
         """Return the storage rows of one entity table of a document.
 
         The row ``id`` combines the document id and the table name (and the index for a
-        list). An entity's own ``id`` never replaces it; that value is kept as ``entity_id``.
+        list). An entity's own ``id`` never replaces it; that value is kept as ``entity_id``,
+        unless the entity has an ``entity_id`` field of its own, which is then kept instead.
 
         Args:
             doc_id: Document id.
@@ -244,8 +245,9 @@ class EntityStoreOperator(AbstractOperator):
         return [
             {
                 "id": key,
-                **{field: value for field, value in item.items() if field != "id"},
                 **({"entity_id": item["id"]} if "id" in item else {}),
+                # Spread last, so an entity's own entity_id field is kept.
+                **{field: value for field, value in item.items() if field != "id"},
             }
             for key, item in items
         ]
