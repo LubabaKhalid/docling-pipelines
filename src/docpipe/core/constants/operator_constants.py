@@ -65,6 +65,7 @@ class OperatorConstants:
         SQL_FILTER: Final[str] = "sql_filter"
 
         # Storage Operators
+        DOCUMENT_SET: Final[str] = "document_set"
         ENTITY_CURATION_OPERATOR: Final[str] = "entity_curation_operator"
         ENTITY_STORE_OPERATOR: Final[str] = "entity_store"
         OPENSEARCH: Final[str] = "opensearch"
@@ -211,6 +212,9 @@ class OperatorConstants:
         PROVIDER: Final[str] = "provider"
         PROVIDERS: Final[str] = "providers"
         PROVIDER_CONFIG: Final[str] = "provider_config"
+        # Attribute-metadata key naming the sibling field that selects the active provider
+        # for a provider-config attribute (defaults to "provider" when absent).
+        PROVIDER_FIELD: Final[str] = "provider_field"
         PROVIDER_LITELLM: Final[str] = "litellm"
         PROVIDER_WATSONX: Final[str] = "watsonx"
         REQUIRED: Final[str] = "required"
@@ -398,7 +402,6 @@ class OperatorConstants:
         COLLECTION_NAME: Final[str] = "collection_name"
 
         # Index / collection configuration
-        CREATE_INDEX: Final[str] = "create_index"
         INDEX_MAPPINGS: Final[str] = "index_mappings"
         INDEX_SETTINGS: Final[str] = "index_settings"
         INDEX_TYPE: Final[str] = "index_type"
@@ -464,7 +467,6 @@ class OperatorConstants:
         OPENSEARCH_AWS_REGION: Final[str] = "OPENSEARCH_AWS_REGION"
         OPENSEARCH_JWT_TOKEN: Final[str] = "OPENSEARCH_JWT_TOKEN"
         OPENSEARCH_VECTOR_DIMENSION: Final[str] = "OPENSEARCH_VECTOR_DIMENSION"
-        OPENSEARCH_CREATE_INDEX: Final[str] = "OPENSEARCH_CREATE_INDEX"
         OPENSEARCH_INDEX_NAME: Final[str] = "OPENSEARCH_INDEX_NAME"
         OPENSEARCH_DOC_ID_COLUMN: Final[str] = "OPENSEARCH_DOC_ID_COLUMN"
         OPENSEARCH_EMBEDDINGS_COLUMN: Final[str] = "OPENSEARCH_EMBEDDINGS_COLUMN"
@@ -484,7 +486,6 @@ class OperatorConstants:
         MILVUS_SSL_CERTIFICATE: Final[str] = "MILVUS_SSL_CERTIFICATE"
         MILVUS_AUTH_TYPE: Final[str] = "MILVUS_AUTH_TYPE"
         MILVUS_VECTOR_DIMENSION: Final[str] = "MILVUS_VECTOR_DIMENSION"
-        MILVUS_CREATE_INDEX: Final[str] = "MILVUS_CREATE_INDEX"
         MILVUS_COLLECTION_NAME: Final[str] = "MILVUS_COLLECTION_NAME"
         MILVUS_DOC_ID_COLUMN: Final[str] = "MILVUS_DOC_ID_COLUMN"
         MILVUS_EMBEDDINGS_COLUMN: Final[str] = "MILVUS_EMBEDDINGS_COLUMN"
@@ -794,6 +795,12 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         HAP_REDACTION_CHARACTER_KEY: Final[str] = "hap_redaction_character"
         HAP_REDACTION_KEY: Final[str] = "hap_redaction"
         HAP_THRESHOLD_KEY: Final[str] = "hap_threshold"
+
+        # Per-capability provider selection (legacy "provider"/"provider_config" sets both)
+        PII_PROVIDER_KEY: Final[str] = "pii_provider"
+        PII_PROVIDER_CONFIG_KEY: Final[str] = "pii_provider_config"
+        HAP_PROVIDER_KEY: Final[str] = "hap_provider"
+        HAP_PROVIDER_CONFIG_KEY: Final[str] = "hap_provider_config"
         MODERATIONS: Final[str] = "moderations"
 
         # Redaction Configuration

@@ -30,10 +30,19 @@ logger: logging.Logger = get_logger()
 
 _DOCLING_PIPELINE_OPTIONS_MODULE = "docling.datamodel.pipeline_options"
 
-# Check if ASR dependencies are available using utility function
-_ASR_AVAILABLE = is_asr_available()
-if not _ASR_AVAILABLE:
-    logger.debug("ASR dependencies not available. Install with: uv pip install -e '.[asr]'")
+# ASR availability is resolved lazily: the probe imports docling (and transitively torch/transformers),
+# which must not happen at module import time (e.g. for --list-operators).
+_ASR_AVAILABLE: bool | None = None
+
+
+def _asr_available() -> bool:
+    """Return whether ASR dependencies are installed, probing once on first use."""
+    global _ASR_AVAILABLE
+    if _ASR_AVAILABLE is None:
+        _ASR_AVAILABLE = is_asr_available()
+        if not _ASR_AVAILABLE:
+            logger.debug("ASR dependencies not available. Install with: uv pip install -e '.[asr]'")
+    return _ASR_AVAILABLE
 
 
 @register_text_extraction_adapter
@@ -92,7 +101,7 @@ class DoclingAdapter(TextExtractionPort):
         self.vlm_engine_type = config.get(OperatorConstants.Config.VLM_ENGINE_TYPE)
         self.vlm_provider_config = config.get(OperatorConstants.Config.VLM_PROVIDER_CONFIG)
         self.additional_formats = config.get(OperatorConstants.Extraction.ADDITIONAL_FORMATS, [])
-        self.use_asr_pipeline = config.get(OperatorConstants.Config.USE_ASR_PIPELINE, False) and _ASR_AVAILABLE
+        self.use_asr_pipeline = config.get(OperatorConstants.Config.USE_ASR_PIPELINE, False) and _asr_available()
         # Always use string default for ASR model name
         self.asr_model_name = config.get(
             OperatorConstants.Config.ASR_MODEL_NAME, OperatorConstants.Config.ASR_MODEL_DEFAULT
@@ -144,14 +153,14 @@ class DoclingAdapter(TextExtractionPort):
 
         if self.use_asr_pipeline:
             logger.info("Initialized DoclingAdapter with ASR enabled - model: %s", self.asr_model_name or "default")
-        elif config.get(OperatorConstants.Config.USE_ASR_PIPELINE, False) and not _ASR_AVAILABLE:
+        elif config.get(OperatorConstants.Config.USE_ASR_PIPELINE, False) and not _asr_available():
             logger.warning(
                 "ASR pipeline requested but dependencies not available. Install with: uv pip install -e '.[asr]'"
             )
 
         if ocr_block:
             logger.info(
-                "OCR config — enabled: %s, engine: %s, mode: %s",
+                "OCR config - enabled: %s, engine: %s, mode: %s",
                 self._ocr_enabled,
                 self._ocr_engine,
                 self._ocr_mode,
@@ -201,7 +210,7 @@ class DoclingAdapter(TextExtractionPort):
             )
             accelerator_device = base_device_map.get(device_key)
             if accelerator_device is None:
-                logger.warning("Unrecognised GPU device '%s' — falling back to default converter", self.gpu_device)
+                logger.warning("Unrecognised GPU device '%s' - falling back to default converter", self.gpu_device)
                 return DocumentConverter()
 
             accelerator_options = AcceleratorOptions(
@@ -218,7 +227,7 @@ class DoclingAdapter(TextExtractionPort):
             }
 
             # Include AudioFormatOption only when ASR is enabled and installed
-            if self.use_asr_pipeline and _ASR_AVAILABLE:
+            if self.use_asr_pipeline and _asr_available():
                 try:
                     from docling.document_converter import AudioFormatOption
                     from docling.pipeline.asr_pipeline import AsrPipeline
@@ -266,7 +275,7 @@ class DoclingAdapter(TextExtractionPort):
         entry = _engine_imports.get(self._ocr_engine)
         if entry is None:
             logger.warning(
-                "Unknown OCR engine '%s' — falling back to OcrAutoOptions. Valid engines: %s",
+                "Unknown OCR engine '%s' - falling back to OcrAutoOptions. Valid engines: %s",
                 self._ocr_engine,
                 sorted(_engine_imports.keys()),
             )
@@ -279,7 +288,7 @@ class DoclingAdapter(TextExtractionPort):
             cls = getattr(module, cls_name)
         except (ImportError, AttributeError) as exc:
             logger.warning(
-                "Could not import OCR options for engine '%s': %s — using Docling defaults",
+                "Could not import OCR options for engine '%s': %s - using Docling defaults",
                 self._ocr_engine,
                 exc,
             )
@@ -290,7 +299,7 @@ class DoclingAdapter(TextExtractionPort):
             return cls(**opts) if opts else cls()
         except Exception as exc:
             logger.warning(
-                "Failed to build OCR options for engine '%s': %s — using Docling defaults",
+                "Failed to build OCR options for engine '%s': %s - using Docling defaults",
                 self._ocr_engine,
                 exc,
             )
@@ -423,7 +432,7 @@ class DoclingAdapter(TextExtractionPort):
                     pipeline_options=pipeline_options,
                 )
 
-            if self.use_asr_pipeline and _ASR_AVAILABLE:
+            if self.use_asr_pipeline and _asr_available():
                 # Import ASR classes only when needed
                 from docling.document_converter import AudioFormatOption
                 from docling.pipeline.asr_pipeline import AsrPipeline
@@ -470,6 +479,9 @@ class DoclingAdapter(TextExtractionPort):
                     converter_config=None,
                     additional_formats=self.additional_formats,
                     converter=self._gpu_converter,
+                    doc_format=self.global_config.get(
+                        OperatorConstants.DOC_FORMAT_KEY, OperatorConstants.DOC_FORMAT_DEFAULT
+                    ),
                 )
             else:
                 # Use common extraction method with output_formats
@@ -478,6 +490,9 @@ class DoclingAdapter(TextExtractionPort):
                     binary_content=binary_content,
                     converter_config=converter_config,
                     additional_formats=self.additional_formats,
+                    doc_format=self.global_config.get(
+                        OperatorConstants.DOC_FORMAT_KEY, OperatorConstants.DOC_FORMAT_DEFAULT
+                    ),
                 )
 
             # Add GPU-specific metadata if extraction succeeded and GPU was used

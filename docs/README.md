@@ -31,6 +31,10 @@ Task-oriented guides to help you accomplish specific goals:
 
 ### Advanced Topics
 - **[Advanced Configuration](guides/ADVANCED_CONFIGURATION.md)** - Production deployment and optimization
+- **[Event Streaming Guide](guides/EVENT_STREAMING_GUIDE.md)** - Kafka event-driven execution and routing-key mappings
+- **[Telemetry Setup](guides/TELEMETRY_SETUP.md)** - OpenTelemetry distributed tracing and metrics
+- **[OpenLineage Integration](integrations/openlineage/OPENLINEAGE_GUIDE.md)** - Data lineage events for flow and operator runs, viewable in Marquez
+- **[Job Report Generation](guides/JOB_REPORT_GENERATION.md)** - Automated per-run CSV job reports
 - **[Security Best Practices](guides/SECURITY_BEST_PRACTICES.md)** - Credential management, authentication, ACL, and production hardening
 - **[Unified LLM Architecture](guides/UNIFIED_LLM_ARCHITECTURE_GUIDE.md)** - LLM integration patterns
 - **[Document Libraries](guides/USER_GUIDE_DOCUMENT_LIBRARIES.md)** - Managing document collections
@@ -76,6 +80,7 @@ Documentation for the Docling Pipelines REST API server:
 
 Integration-specific documentation:
 
+- **[OpenLineage](integrations/openlineage/OPENLINEAGE_GUIDE.md)** - Data lineage tracking via the OpenLineage standard
 - **[OpenSearch](integrations/opensearch/)** - Vector storage with OpenSearch
   - [Quick Start](integrations/opensearch/OPENSEARCH_QUICKSTART.md)
   - [Environment Setup](integrations/opensearch/ENVIRONMENT_SETUP.md)
@@ -103,6 +108,7 @@ Internal documentation for maintainers:
 
 Deployment guides for production environments:
 
+- **[Docker Compose Deployment](deployment/DOCKER_COMPOSE.md)** - Run Docling Pipelines locally or in containers with Docker Compose
 - **[OpenShift Deployment](deployment/OPENSHIFT.md)** - Deploy Docling Pipelines on OpenShift
 
 ## 💡 Architecture
@@ -121,7 +127,7 @@ docs/
 ├── operators/           # Operator configuration examples
 ├── reference/           # Parameter and API lookups
 ├── api/                 # REST API documentation
-├── integrations/        # Integration-specific docs
+├── integrations/        # Integration-specific docs (OpenLineage, OpenSearch, Milvus, Prefect, Vault)
 ├── internals/           # Internal maintainer docs
 └── deployment/          # Deployment guides
 ```
@@ -142,6 +148,7 @@ docs/
 - **Use the REST API** → [REST API Server](api/REST_API_SERVER.md)
 - **Set up OAuth2 authentication** → [OAuth2 Authentication Guide](api/OAUTH2_AUTHENTICATION.md)
 - **Create a custom connector** → [Create Connector Guide](guides/CREATE_CONNECTOR_GUIDE.md)
+- **Track data lineage** → [OpenLineage Integration Guide](integrations/openlineage/OPENLINEAGE_GUIDE.md)
 - **Secure my deployment** → [Security Best Practices](guides/SECURITY_BEST_PRACTICES.md)
 - **Deploy to production** → [Advanced Configuration](guides/ADVANCED_CONFIGURATION.md)
 - **Troubleshoot an issue** → [Troubleshooting Guide](../TROUBLESHOOTING.md)

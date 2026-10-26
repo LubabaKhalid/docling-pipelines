@@ -26,6 +26,8 @@ from docpipe.core.assets.flows.application.services import FlowService
 from docpipe.core.assets.flows.domain.models.flow import Flow
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.custom_operators.service import CustomOperatorService
+from docpipe.core.event_streaming.factory import EventStreamingFactory
+from docpipe.core.event_streaming.mapping_service import EventMappingService
 from docpipe.core.job_management.adapters.config.job_management_factory import get_default_factory
 from docpipe.core.job_management.application.services import JobManagementService
 from docpipe.core.job_management.domain.ports import JobStatsService
@@ -61,16 +63,26 @@ def get_flow_repository() -> AssetRepository[Flow]:
     return RepositoryFactory.create_repository(asset_type=Flow)
 
 
-def get_flow_service(repository: AssetRepository[Flow] = Depends(get_flow_repository)) -> FlowService:  # noqa: B008
+def get_flow_service(
+    repository: AssetRepository[Flow] = Depends(get_flow_repository),  # noqa: B008
+    job_stats_service: JobStatsService = Depends(get_job_stats_service),  # noqa: B008
+) -> FlowService:
     """Dependency provider for flow service.
 
     Args:
         repository: Injected repository instance
+        job_stats_service: Injected job stats service for cascade-deleting job runs on flow delete
 
     Returns:
-        FlowService: Service instance with injected repository
+        FlowService: Service instance with injected repository and job stats service
     """
-    return FlowService(repository=repository)
+    return FlowService(repository=repository, job_stats_service=job_stats_service)
+
+
+@lru_cache(maxsize=1)
+def get_event_mapping_service() -> EventMappingService:
+    """Return the process-wide filesystem-backed event mapping service."""
+    return EventStreamingFactory.create_event_mapping_service()
 
 
 @lru_cache(maxsize=1)

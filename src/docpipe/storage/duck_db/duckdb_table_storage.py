@@ -307,8 +307,6 @@ class DuckDBTableStorage(TableStoragePort):
                 result = conn.execute(query).fetch_arrow_table()
                 logger.debug("Read %s rows from %s (limit=%s, offset=%s)", len(result), table_name, limit, offset)
                 return result
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to read data from {table_name}: {e}") from e
         except Exception as e:
@@ -334,8 +332,6 @@ class DuckDBTableStorage(TableStoragePort):
                 conn.execute(f"DROP TABLE IF EXISTS {quoted_table}")
                 logger.info("Deleted table: %s", table_name)
                 return True
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to delete table {table_name}: {e}") from e
         except Exception as e:
@@ -386,8 +382,6 @@ class DuckDBTableStorage(TableStoragePort):
                 count_query = f"SELECT COUNT(*) as total FROM {quoted_table}"  # nosec B608 — table_name is validated and quoted via _quote_identifier()
                 count_result = conn.execute(count_query).fetchone()
                 return count_result[0] if count_result else 0
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to get row count for {table_name}: {e}") from e
         except Exception as e:
@@ -439,8 +433,6 @@ class DuckDBTableStorage(TableStoragePort):
                 query = f"SELECT * FROM {quoted_table} LIMIT 1"  # nosec B608 — table_name is validated and quoted via _quote_identifier()
                 result = conn.execute(query).fetch_arrow_table()
                 return result.schema
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to get schema for {table_name}: {e}") from e
         except Exception as e:

@@ -6,7 +6,8 @@ This guide covers advanced configuration topics for production deployments, dist
 
 1. [Job Stats Storage Configuration](#job-stats-storage-configuration)
 2. [Incremental Metadata Configuration](#incremental-metadata-configuration)
-3. [Execution Models](#execution-models)
+3. [Ededup Shared Storage Guidance](#ededup-shared-storage-guidance)
+4. [Execution Models](#execution-models)
 
 ---
 
@@ -93,6 +94,19 @@ job_management:
     config:
       database_path: ./data/duckdb/job_stats.duckdb
 ```
+
+DuckDB defaults to `<DOCPIPE_DATA_PATH>/duckdb`, or `<project-root>/data/duckdb` when unset, resolved at startup.
+Job stats use `job_stats.duckdb`; document sets and libraries share the default `document_sets.duckdb` file.
+Explicit `database_path` settings take precedence over `DOCPIPE_DATA_PATH`, including the YAML example above.
+
+The shipped root [`docling-pipelines-config.yaml`](../../docling-pipelines-config.yaml) explicitly sets the document-set
+`database_path` to `data/duckdb/document_sets.duckdb`. Setting `DOCPIPE_DATA_PATH` alone does not move the document-set
+database used by the API. The environment-based default applies only when no `database_path` is configured.
+
+**Compatibility limitation:** With the shipped YAML and `DOCPIPE_DATA_PATH` pointing to a different data root, a flow
+with a `document_set` node that has no explicit `database_path` uses the environment-based default, while the API keeps
+the YAML path. These consumers previously used the same file when launched from the project root. To share a database,
+set the same absolute `database_path` in the API's document-set repository configuration and the operator's configuration.
 
 Important notes:
 
@@ -250,6 +264,32 @@ Guidance:
 See [`docling-pipelines-config.yaml.example`](../../docling-pipelines-config.yaml.example) for complete backend examples and environment variable patterns.
 
 ---
+
+## Ededup Shared Storage Guidance
+
+`EdedupOperator` records admitted hashes persistently by job, flow node, and run. Configure its registry under
+`ededup.storage` in `docling-pipelines-config.yaml`; this is separate from `incremental_metadata.storage` and the
+flow's `global_config`.
+
+For workers on separate hosts or pods, use a shared PostgreSQL database and schema. Configure the same connection
+settings and schema for every worker, and grant the database role permission to create the schema and `hashes` table
+or provision those objects ahead of time. The default schema is `ededup_registry`.
+
+```yaml
+ededup:
+  storage:
+    type: postgresql
+    config:
+      postgres:
+        schema: ededup_registry
+```
+
+Connection settings can use the common `DOCPIPE_POSTGRES_HOST`, `DOCPIPE_POSTGRES_PORT`, `DOCPIPE_POSTGRES_DB`,
+`DOCPIPE_POSTGRES_USER`, and `DOCPIPE_POSTGRES_PASSWORD` environment variables. If using filesystem storage instead,
+every worker must see the same shared filesystem path and support reliable file locking and atomic replacement. A
+pod-local directory does not coordinate admissions between pods; use PostgreSQL when workers cannot share a reliable
+filesystem. See [Global Configuration](../reference/GLOBAL_CONFIG.md#ededup-registry-storage) and the
+[operator reference](../reference/OPERATORS.md#ededupoperator) for precedence and path details.
 
 ## Execution Models
 
