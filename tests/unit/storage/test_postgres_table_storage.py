@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for PostgresTableStorage, with a fake engine instead of a live database.
 
 The SQL behavior against a real PostgreSQL server is covered by

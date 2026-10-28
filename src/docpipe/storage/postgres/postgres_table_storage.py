@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """PostgreSQL storage implementation for PyArrow tables.
 
 ``PostgresTableStorage`` is a backend-generic implementation of ``TableStoragePort``:

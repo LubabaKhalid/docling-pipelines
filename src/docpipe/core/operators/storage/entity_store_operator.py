@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Entity storage operator."""
 
 import json
@@ -173,6 +176,10 @@ class EntityStoreOperator(AbstractOperator):
         errors: dict[str, list[str]] = {}
         try:
             for table_name, rows in rows_by_table.items():
+                # Handle empty entity arrays ([]) so they don't produce 0-column tables
+                if not rows:
+                    continue
+
                 try:
                     entity_table = self._to_arrow_table(rows=rows)
                     if not self.storage.table_exists(table_name=table_name):

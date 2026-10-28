@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for DuckDBTableStorage (PyArrow table storage)."""
 
 import pyarrow as pa

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Table storage port — interface for PyArrow table storage."""
 
 from abc import ABC, abstractmethod

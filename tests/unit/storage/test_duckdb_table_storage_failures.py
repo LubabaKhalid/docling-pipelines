@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Failure-path tests for DuckDBTableStorage against real DuckDB files."""
 
 import logging

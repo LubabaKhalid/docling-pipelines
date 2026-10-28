@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Fixtures for the table storage contract tests.
 
 Every test runs once per ``StorageFactory`` table backend. The PostgreSQL runs need

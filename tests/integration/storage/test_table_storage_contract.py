@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Contract tests for ``TableStoragePort``, run against every ``StorageFactory`` backend.
 
 The same cases run on DuckDB and on a real PostgreSQL server, so the entity store
