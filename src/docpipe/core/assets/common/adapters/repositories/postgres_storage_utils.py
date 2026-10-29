@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Shared PostgreSQL plumbing for the asset metadata and attachment repositories.
 
 Holds the SQLAlchemy table definitions, a process-wide engine cache, and the
@@ -142,7 +145,7 @@ class PostgresStorageUtils:
     def get_engine(cls, *, config: dict[str, Any], owner: str) -> Engine:
         """Return a cached SQLAlchemy engine for the given repository config.
 
-        Reuses the job stats connection helpers so that the YAML keys, the
+        Uses the shared PostgreSQL connection helpers so that the YAML keys, the
         ``DOCPIPE_POSTGRES_*`` environment fallbacks and the pool settings behave
         identically for every PostgreSQL-backed component.
 
@@ -157,10 +160,7 @@ class PostgresStorageUtils:
             RepositoryConfigurationException: If no PostgreSQL password is configured.
             PostgresConnectionException: If the database cannot be reached.
         """
-        from docpipe.core.job_management.adapters.stores.postgres.database import (
-            create_postgres_engine,
-            get_postgres_connection_string,
-        )
+        from docpipe.storage.postgres.connection import create_postgres_engine, get_postgres_connection_string
 
         section = cls.get_postgres_section(config=config)
         engine_config = {DocpipeConfigKeys.POSTGRES: section}

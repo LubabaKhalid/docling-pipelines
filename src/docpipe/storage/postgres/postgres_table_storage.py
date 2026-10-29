@@ -29,12 +29,9 @@ from typing import Any, ClassVar
 import pyarrow as pa
 from sqlalchemy import text
 
-from docpipe.core.job_management.adapters.stores.postgres.database import (
-    create_postgres_engine,
-    get_postgres_connection_string,
-)
 from docpipe.storage.exceptions import StorageConnectionError, StorageException, StorageValidationError
 from docpipe.storage.interfaces.table_storage_port import TableStoragePort
+from docpipe.storage.postgres.connection import create_postgres_engine, get_postgres_connection_string
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
