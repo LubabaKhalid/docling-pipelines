@@ -11,6 +11,7 @@ from unittest.mock import ANY, MagicMock, Mock, patch
 import pytest
 from pydantic import ValidationError
 
+from docpipe.core.operators.ingest.adapters.outbound.sources.onedrive import adapter as onedrive_adapter_module
 from docpipe.core.operators.ingest.adapters.outbound.sources.onedrive.adapter import (
     OneDriveSourceAdapter,
 )
@@ -1208,7 +1209,6 @@ class TestSharePointBindFileReference:
 # OneDrive bind_file_reference
 # ---------------------------------------------------------------------------
 
-_ONEDRIVE_MODULE = "docpipe.core.operators.ingest.adapters.outbound.sources.onedrive.adapter"
 _ONEDRIVE_SECRET = "test-onedrive-secret"  # pragma: allowlist secret
 _ONEDRIVE_ITEM_ID = "01QRSTUVWXYZABCDEFGHIJKLMN"
 _ONEDRIVE_FILE_URL = "https://contoso-my.sharepoint.com/?id=/personal/ana_contoso_com/Documents/Reports/q1.pdf"
@@ -1264,7 +1264,7 @@ class TestOneDriveBindFileReference:
         """A valid item id or file URL is stored as file_path without a Graph call."""
         provider_config = _onedrive_provider_config()
 
-        with patch(f"{_ONEDRIVE_MODULE}.MicrosoftGraphLoader") as loader:
+        with patch.object(onedrive_adapter_module, "MicrosoftGraphLoader") as loader:
             OneDriveSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference=file_reference)
 
         loader.assert_not_called()
@@ -1307,7 +1307,7 @@ class TestOneDriveBindFileReference:
         provider_config = _onedrive_provider_config()
         caplog.set_level(logging.DEBUG)
 
-        with patch(f"{_ONEDRIVE_MODULE}.MicrosoftGraphLoader") as loader:
+        with patch.object(onedrive_adapter_module, "MicrosoftGraphLoader") as loader:
             with pytest.raises(ValueError, match=match) as exc_info:
                 OneDriveSourceAdapter.bind_file_reference(
                     provider_config=provider_config,
@@ -1377,7 +1377,7 @@ class TestOneDriveBindFileReference:
             "lastModifiedDateTime": "2026-01-15T12:00:00Z",
         }
 
-        with patch(f"{_ONEDRIVE_MODULE}.MicrosoftGraphLoader", return_value=loader_instance):
+        with patch.object(onedrive_adapter_module, "MicrosoftGraphLoader", return_value=loader_instance):
             documents = asyncio.run(collect_async(adapter.fetch_documents(config)))
 
         assert len(documents) == 1
@@ -1396,7 +1396,7 @@ class TestOneDriveBindFileReference:
         """A URL that binding accepts is resolved as a URL, and an id is never mistaken for one."""
         adapter = OneDriveSourceAdapter()
 
-        with patch(f"{_ONEDRIVE_MODULE}.extract_msgraph_file_id_from_url", return_value=None):
+        with patch.object(onedrive_adapter_module, "extract_msgraph_file_id_from_url", return_value=None):
             with pytest.raises(ValueError, match="Could not extract file ID"):
                 adapter._resolve_onedrive_item_id(
                     file_path="HTTPS://contoso-my.sharepoint.com/?id=/q1.pdf",
@@ -1409,6 +1409,28 @@ class TestOneDriveBindFileReference:
             file_path="httpitem123", drive_id="drive1", loader=Mock(), token="token"
         )
         assert (item_id, drive_id) == ("httpitem123", "drive1")
+
+    def test_binary_fetch_matches_url_scheme_case_insensitively(self) -> None:
+        """A web URL source id with an uppercase scheme uses the item id, not the URL."""
+        loader_instance = Mock()
+        loader_instance._get_token.return_value = "token"
+        loader_instance._rest_client.call_rest_json.return_value = {}
+        response = MagicMock()
+        response.content = b"payload"
+        loader_instance._rest_client.call_rest.return_value = response
+        provider_config = {**_onedrive_provider_config(), "item_id": _ONEDRIVE_ITEM_ID}
+
+        with patch.object(onedrive_adapter_module, "MicrosoftGraphLoader", return_value=loader_instance):
+            result = OneDriveSourceAdapter().fetch_binary_content(
+                source_id="HTTPS://contoso-my.sharepoint.com/q1.pdf", provider_config=provider_config
+            )
+
+        assert result == b"payload"
+        loader_instance._rest_client.call_rest_json.assert_called_once_with(
+            method=ANY,
+            url=f"/drives/onedrive-drive-id/items/{_ONEDRIVE_ITEM_ID}",
+            headers={"Authorization": "Bearer token"},
+        )
 
     def test_event_reference_stays_literal_while_credentials_resolve(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Event references are not expanded, and trusted credential variables still resolve."""
@@ -1476,7 +1498,7 @@ class TestOneDriveBindFileReference:
         )
         caplog.set_level(logging.DEBUG)
 
-        with patch(f"{_ONEDRIVE_MODULE}.MicrosoftGraphLoader") as loader:
+        with patch.object(onedrive_adapter_module, "MicrosoftGraphLoader") as loader:
             with pytest.raises(ValueError, match="id or sourcedoc") as exc_info:
                 operator._build_adapter_config(operator.provider)
 

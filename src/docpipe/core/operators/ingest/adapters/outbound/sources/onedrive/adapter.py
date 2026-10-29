@@ -89,13 +89,13 @@ class OneDriveSourceAdapter(DocumentSourcePort):
         reference = file_reference.strip()
         lowered = reference.lower()
         if "://" in reference and not lowered.startswith(("http://", "https://")):
-            raise ValueError("File reference must be a OneDrive item id or file URL, not a URI")
+            raise ValueError("File reference must be a Microsoft OneDrive item id or file URL, not a URI")
 
         if lowered.startswith(("http://", "https://")):
             extracted = extract_msgraph_file_id_from_url(reference)
             if not isinstance(extracted, str) or not extracted.strip():
                 raise ValueError(
-                    "File reference must be a OneDrive item id or a file URL with an id or sourcedoc parameter"
+                    "File reference must be a Microsoft OneDrive item id or a file URL with an id or sourcedoc parameter"
                 )
 
         provider_config["file_path"] = reference
@@ -387,7 +387,7 @@ class OneDriveSourceAdapter(DocumentSourcePort):
 
             # Handle case where source_id is a web URL instead of item_id
             item_id = source_id
-            if source_id.startswith("http"):
+            if source_id.lower().startswith(("http://", "https://")):
                 extracted_id = provider_config.get("item_id")
                 if not extracted_id:
                     logger.error("source_id is a web URL but no item_id found in provider_config: %s", source_id)
