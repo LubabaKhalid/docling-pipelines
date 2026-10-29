@@ -5,6 +5,8 @@
 
 Builds the connection string from the ``postgres`` config section and the
 ``DOCPIPE_POSTGRES_*`` environment variables, and creates SQLAlchemy engines.
+``get_shared_postgres_engine`` keeps one engine, and so one connection pool, per
+connection configuration for the whole process.
 
 Configuration precedence:
 1. Config dict passed to functions (from YAML)
@@ -13,6 +15,7 @@ Configuration precedence:
 """
 
 import os
+import threading
 from typing import Any
 
 from sqlalchemy import create_engine, text
@@ -22,6 +25,10 @@ from docpipe.core.constants import DocpipeConfigKeys, EnvironmentVariables
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger("DOCPIPE_POSTGRES_DATABASE")
+
+# One engine per (connection string, pool_size, max_overflow, pool_timeout).
+_shared_engines: dict[tuple[str, int, int, int], Engine] = {}
+_shared_engines_lock = threading.Lock()
 
 
 def get_postgres_connection_string(*, config: dict[str, Any] | None = None) -> str | None:
@@ -129,3 +136,49 @@ def create_postgres_engine(*, connection_string: str, config: dict[str, Any] | N
             host=postgres_config.get(DocpipeConfigKeys.HOST, "unknown"),
             database=postgres_config.get(DocpipeConfigKeys.DATABASE, "unknown"),
         ) from e
+
+
+def get_shared_postgres_engine(*, postgres: dict[str, Any] | None = None) -> Engine | None:
+    """Return the engine for these connection settings, shared by the whole process.
+
+    The first call for a connection string and pool settings creates and checks the
+    engine with ``create_postgres_engine``; later calls return the same engine, so
+    every component that connects with the same settings uses one connection pool.
+
+    Args:
+        postgres: The ``postgres`` config section. A setting that is not given falls
+            back to its ``DOCPIPE_POSTGRES_*`` environment variable.
+
+    Returns:
+        The shared engine, or None if no password is configured.
+
+    Raises:
+        PostgresConnectionException: If a new engine cannot connect.
+    """
+    config = {DocpipeConfigKeys.POSTGRES: dict(postgres or {})}
+    connection_string = get_postgres_connection_string(config=config)
+    if not connection_string:
+        return None
+
+    section = config[DocpipeConfigKeys.POSTGRES]
+    cache_key = (
+        connection_string,
+        int(section.get(DocpipeConfigKeys.POOL_SIZE, 5)),
+        int(section.get(DocpipeConfigKeys.MAX_OVERFLOW, 10)),
+        int(section.get(DocpipeConfigKeys.POOL_TIMEOUT, 30)),
+    )
+    with _shared_engines_lock:
+        engine = _shared_engines.get(cache_key)
+        if engine is None:
+            engine = create_postgres_engine(connection_string=connection_string, config=config)
+            _shared_engines[cache_key] = engine
+    return engine
+
+
+def dispose_shared_postgres_engines() -> None:
+    """Dispose and forget every shared engine (used on shutdown and in tests)."""
+    with _shared_engines_lock:
+        engines = list(_shared_engines.values())
+        _shared_engines.clear()
+    for engine in engines:
+        engine.dispose()

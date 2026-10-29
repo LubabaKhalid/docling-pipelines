@@ -15,11 +15,11 @@ from unittest.mock import MagicMock
 import pyarrow as pa
 import pytest
 
+from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import PostgresStorageUtils
 from docpipe.storage.exceptions import StorageConnectionError, StorageException, StorageValidationError
 from docpipe.storage.factory import StorageFactory
+from docpipe.storage.postgres import connection
 from docpipe.storage.postgres.postgres_table_storage import PostgresTableStorage
-
-_MODULE = "docpipe.storage.postgres.postgres_table_storage"
 
 
 class _FakeResult:
@@ -87,14 +87,21 @@ class _FakeEngine:
         return [(sql, params) for sql, params in self.statements if fragment in sql]
 
 
+@pytest.fixture(autouse=True)
+def _reset_shared_engines():
+    yield
+    connection.dispose_shared_postgres_engines()
+
+
 @pytest.fixture
 def engine(monkeypatch) -> _FakeEngine:
     fake = _FakeEngine()
     monkeypatch.setattr(
-        f"{_MODULE}.get_postgres_connection_string",
+        connection,
+        "get_postgres_connection_string",
         lambda **kwargs: "postgresql+psycopg2://user:password@localhost:5432/docpipe",  # pragma: allowlist secret
     )
-    monkeypatch.setattr(f"{_MODULE}.create_postgres_engine", lambda **kwargs: fake)
+    monkeypatch.setattr(connection, "create_postgres_engine", lambda **kwargs: fake)
     return fake
 
 
@@ -123,7 +130,7 @@ class TestPostgresTableStorageInit:
             PostgresTableStorage(schema="bad-schema")
 
     def test_missing_password_fails(self, monkeypatch):
-        monkeypatch.setattr(f"{_MODULE}.get_postgres_connection_string", lambda **kwargs: None)
+        monkeypatch.setattr(connection, "get_postgres_connection_string", lambda **kwargs: None)
 
         with pytest.raises(StorageConnectionError, match="not configured"):
             PostgresTableStorage()
@@ -134,10 +141,60 @@ class TestPostgresTableStorageInit:
         with pytest.raises(StorageConnectionError, match="connection refused"):
             PostgresTableStorage()
 
-    def test_close_disposes_the_engine(self, storage, engine):
+    def test_engine_that_cannot_connect_fails_at_creation(self, monkeypatch):
+        monkeypatch.setattr(
+            connection,
+            "get_postgres_connection_string",
+            lambda **kwargs: "postgresql+psycopg2://user:password@localhost:1/docpipe",  # pragma: allowlist secret
+        )
+        monkeypatch.setattr(connection, "create_postgres_engine", MagicMock(side_effect=RuntimeError("refused")))
+
+        with pytest.raises(StorageConnectionError, match="Failed to connect to PostgreSQL storage: refused"):
+            PostgresTableStorage()
+
+    def test_close_keeps_the_shared_engine_open(self, storage, engine):
         storage.close()
 
+        assert not engine.disposed
+
+
+class TestSharedEngine:
+    """Storages and asset repositories with the same settings share one engine."""
+
+    def test_storages_with_the_same_settings_share_one_engine(self, monkeypatch, engine):
+        create = MagicMock(return_value=engine)
+        monkeypatch.setattr(connection, "create_postgres_engine", create)
+
+        first = PostgresTableStorage(schema="entities")
+        second = PostgresTableStorage(schema="document_sets")
+
+        assert first.engine is second.engine is engine
+        create.assert_called_once()
+
+    def test_table_storage_and_asset_repositories_share_one_engine(self, monkeypatch):
+        fake = _FakeEngine()
+        create = MagicMock(return_value=fake)
+        monkeypatch.setattr(connection, "create_postgres_engine", create)
+        postgres = {"host": "db", "password": "secret"}  # pragma: allowlist secret
+
+        storage = PostgresTableStorage(schema="entities", postgres=postgres)
+        asset_engine = PostgresStorageUtils.get_engine(
+            config={"postgres": {**postgres, "schema": "docpipe_assets"}}, owner="DocumentSet repository"
+        )
+
+        assert asset_engine is storage.engine is fake
+        create.assert_called_once()
+
+    def test_dispose_shared_engines_disposes_and_forgets_them(self, monkeypatch, engine):
+        create = MagicMock(return_value=engine)
+        monkeypatch.setattr(connection, "create_postgres_engine", create)
+        PostgresTableStorage()
+
+        connection.dispose_shared_postgres_engines()
+        PostgresTableStorage()
+
         assert engine.disposed
+        assert create.call_count == 2
 
 
 class TestPostgresTableStorageHelpers:

@@ -31,7 +31,7 @@ from sqlalchemy import text
 
 from docpipe.storage.exceptions import StorageConnectionError, StorageException, StorageValidationError
 from docpipe.storage.interfaces.table_storage_port import TableStoragePort
-from docpipe.storage.postgres.connection import create_postgres_engine, get_postgres_connection_string
+from docpipe.storage.postgres.connection import get_shared_postgres_engine
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -135,16 +135,19 @@ class PostgresTableStorage(TableStoragePort):
         # Column types per table, read from information_schema and updated on changes.
         self._column_types: dict[str, dict[str, str]] = {}
 
-        connection_config = {"postgres": dict(postgres or {})}
-        connection_string = get_postgres_connection_string(config=connection_config)
-        if not connection_string:
+        try:
+            # One engine per connection configuration, shared with the other PostgreSQL components.
+            engine = get_shared_postgres_engine(postgres=postgres)
+        except Exception as exc:
+            raise StorageConnectionError(message=f"Failed to connect to PostgreSQL storage: {exc}") from exc
+        if engine is None:
             raise StorageConnectionError(
                 message="PostgreSQL connection is not configured. Set the password in config or DOCPIPE_POSTGRES_PASSWORD."
             )
+        self.engine = engine
 
         try:
-            self.engine = create_postgres_engine(connection_string=connection_string, config=connection_config)
-            # create_engine does not connect, so check the connection here: a misconfigured
+            # A shared engine may have been created earlier, so check the connection here: a misconfigured
             # backend then fails when the storage is created, not at its first use.
             with self.engine.begin() as connection:
                 connection.execute(text("SELECT 1"))
@@ -157,8 +160,13 @@ class PostgresTableStorage(TableStoragePort):
         logger.info("Initialized PostgresTableStorage in schema %s", schema)
 
     def close(self) -> None:
-        """Dispose the connection pool. The storage reconnects if it is used again."""
-        self.engine.dispose()
+        """Release the storage and forget the cached column types.
+
+        The engine is shared per connection configuration with the other PostgreSQL
+        components, so its connection pool stays open; ``dispose_shared_postgres_engines``
+        closes it. The storage can be used again after ``close()``.
+        """
+        self._column_types.clear()
 
     @staticmethod
     def _validate_identifier(*, identifier: str, kind: str) -> None:
