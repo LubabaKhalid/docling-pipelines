@@ -16,6 +16,7 @@ import pyarrow as pa
 import pytest
 
 from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import PostgresStorageUtils
+from docpipe.exceptions.docpipe_exceptions import PostgresConnectionException
 from docpipe.storage.exceptions import StorageConnectionError, StorageException, StorageValidationError
 from docpipe.storage.factory import StorageFactory
 from docpipe.storage.postgres import connection
@@ -147,10 +148,26 @@ class TestPostgresTableStorageInit:
             "get_postgres_connection_string",
             lambda **kwargs: "postgresql+psycopg2://user:password@localhost:1/docpipe",  # pragma: allowlist secret
         )
-        monkeypatch.setattr(connection, "create_postgres_engine", MagicMock(side_effect=RuntimeError("refused")))
+        monkeypatch.setattr(
+            connection,
+            "create_postgres_engine",
+            MagicMock(side_effect=PostgresConnectionException(message="refused", host="db", database="docpipe")),
+        )
 
-        with pytest.raises(StorageConnectionError, match="Failed to connect to PostgreSQL storage: refused"):
+        with pytest.raises(StorageConnectionError, match="Failed to connect to PostgreSQL storage") as exc_info:
             PostgresTableStorage()
+
+        assert isinstance(exc_info.value.__cause__, PostgresConnectionException)
+
+    def test_other_errors_from_the_engine_are_not_wrapped(self, monkeypatch):
+        monkeypatch.setattr(
+            connection,
+            "get_postgres_connection_string",
+            lambda **kwargs: "postgresql+psycopg2://user:password@localhost:5432/docpipe",  # pragma: allowlist secret
+        )
+
+        with pytest.raises(ValueError):
+            PostgresTableStorage(postgres={"pool_size": "five"})
 
     def test_close_keeps_the_shared_engine_open(self, storage, engine):
         storage.close()
@@ -184,6 +201,37 @@ class TestSharedEngine:
 
         assert asset_engine is storage.engine is fake
         create.assert_called_once()
+
+    def test_cached_engine_is_returned_without_the_lock(self, monkeypatch, engine):
+        first = PostgresTableStorage()
+
+        class _NotToBeTaken:
+            def __enter__(self):
+                raise AssertionError("the lock was taken for a cached engine")
+
+            def __exit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(connection, "_shared_engines_lock", _NotToBeTaken())
+
+        assert PostgresTableStorage(schema="other").engine is first.engine
+
+    def test_engine_creation_is_logged_with_its_owner(self, monkeypatch, caplog):
+        monkeypatch.setattr(connection, "create_postgres_engine", MagicMock(return_value=_FakeEngine()))
+        postgres = {"host": "db", "user": "docpipe", "password": "secret"}  # pragma: allowlist secret
+        caplog.set_level("DEBUG", logger="DOCPIPE_POSTGRES_DATABASE")
+
+        PostgresStorageUtils.get_engine(config={"postgres": postgres}, owner="DocumentSet repository")
+        PostgresTableStorage(schema="entities", postgres=postgres)
+
+        messages = [(r.levelname, r.getMessage()) for r in caplog.records]
+        created = [message for level, message in messages if level == "INFO" and "shared PostgreSQL engine" in message]
+        reused = [message for level, message in messages if level == "DEBUG" and "shared PostgreSQL engine" in message]
+        assert created == ["Created shared PostgreSQL engine for DocumentSet repository: docpipe@db:5432/docpipe"]
+        assert reused == [
+            "Reusing shared PostgreSQL engine for table storage in schema entities: docpipe@db:5432/docpipe"
+        ]
+        assert "secret" not in caplog.text
 
     def test_dispose_shared_engines_disposes_and_forgets_them(self, monkeypatch, engine):
         create = MagicMock(return_value=engine)

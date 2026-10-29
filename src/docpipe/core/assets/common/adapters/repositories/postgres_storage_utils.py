@@ -162,7 +162,7 @@ class PostgresStorageUtils:
         """
         from docpipe.storage.postgres.connection import get_shared_postgres_engine
 
-        engine = get_shared_postgres_engine(postgres=cls.get_postgres_section(config=config))
+        engine = get_shared_postgres_engine(postgres=cls.get_postgres_section(config=config), owner=owner)
         if engine is None:
             raise RepositoryConfigurationException(
                 f"PostgreSQL connection is not configured for {owner}: set 'postgres.password' in the "

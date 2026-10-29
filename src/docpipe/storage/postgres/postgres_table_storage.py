@@ -29,6 +29,7 @@ from typing import Any, ClassVar
 import pyarrow as pa
 from sqlalchemy import text
 
+from docpipe.exceptions.docpipe_exceptions import PostgresConnectionException
 from docpipe.storage.exceptions import StorageConnectionError, StorageException, StorageValidationError
 from docpipe.storage.interfaces.table_storage_port import TableStoragePort
 from docpipe.storage.postgres.connection import get_shared_postgres_engine
@@ -137,8 +138,10 @@ class PostgresTableStorage(TableStoragePort):
 
         try:
             # One engine per connection configuration, shared with the other PostgreSQL components.
-            engine = get_shared_postgres_engine(postgres=postgres)
-        except Exception as exc:
+            engine = get_shared_postgres_engine(postgres=postgres, owner=f"table storage in schema {schema}")
+        except PostgresConnectionException as exc:
+            # TableStoragePort reports connection failures as StorageConnectionError; the
+            # PostgresConnectionException stays available as the cause.
             raise StorageConnectionError(message=f"Failed to connect to PostgreSQL storage: {exc}") from exc
         if engine is None:
             raise StorageConnectionError(

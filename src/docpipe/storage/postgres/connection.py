@@ -19,7 +19,7 @@ import threading
 from typing import Any
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 
 from docpipe.core.constants import DocpipeConfigKeys, EnvironmentVariables
 from docpipe.utils.infrastructure.logging import get_logger
@@ -138,16 +138,21 @@ def create_postgres_engine(*, connection_string: str, config: dict[str, Any] | N
         ) from e
 
 
-def get_shared_postgres_engine(*, postgres: dict[str, Any] | None = None) -> Engine | None:
+def get_shared_postgres_engine(
+    *, postgres: dict[str, Any] | None = None, owner: str = "PostgreSQL storage"
+) -> Engine | None:
     """Return the engine for these connection settings, shared by the whole process.
 
     The first call for a connection string and pool settings creates and checks the
     engine with ``create_postgres_engine``; later calls return the same engine, so
     every component that connects with the same settings uses one connection pool.
+    A cached engine is returned without taking the lock, so a slow or failing
+    connection attempt never blocks the components whose engine already exists.
 
     Args:
         postgres: The ``postgres`` config section. A setting that is not given falls
             back to its ``DOCPIPE_POSTGRES_*`` environment variable.
+        owner: Human-readable name of the component asking, for the log messages.
 
     Returns:
         The shared engine, or None if no password is configured.
@@ -167,11 +172,22 @@ def get_shared_postgres_engine(*, postgres: dict[str, Any] | None = None) -> Eng
         int(section.get(DocpipeConfigKeys.MAX_OVERFLOW, 10)),
         int(section.get(DocpipeConfigKeys.POOL_TIMEOUT, 30)),
     )
+    url = make_url(connection_string)
+    target = f"{url.username}@{url.host}:{url.port}/{url.database}"
+
+    # Fast path without the lock: a cached engine is only removed by dispose_shared_postgres_engines().
+    engine = _shared_engines.get(cache_key)
+    if engine is not None:
+        logger.debug("Reusing shared PostgreSQL engine for %s: %s", owner, target)
+        return engine
+
     with _shared_engines_lock:
+        # Another thread may have created the engine while this one waited for the lock.
         engine = _shared_engines.get(cache_key)
         if engine is None:
             engine = create_postgres_engine(connection_string=connection_string, config=config)
             _shared_engines[cache_key] = engine
+            logger.info("Created shared PostgreSQL engine for %s: %s", owner, target)
     return engine
 
 
