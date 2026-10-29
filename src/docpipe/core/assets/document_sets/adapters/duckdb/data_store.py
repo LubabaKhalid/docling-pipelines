@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """DuckDB implementation of DocumentSetStorage.
 
 Writes PyArrow table data to a DuckDB table and returns an AttachmentRef
@@ -183,8 +186,12 @@ class DuckDBDocumentSetStorage(DocumentSetStorage):
                     error_code=ErrorCode.DOCUMENT_SET_TABLE_NOT_FOUND,
                 )
 
+            # Only the columns of this table: a table with the same name can exist in another schema.
             column_result = self._storage.execute_query(
-                query="SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+                query=(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name = ?"
+                ),
                 params=[table_name],
             )  # nosec B608 — table_name is a sanitized identifier derived from document set name, not user input
             column_names = [row["column_name"] for row in column_result.to_pylist()]
